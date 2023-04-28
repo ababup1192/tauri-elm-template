@@ -4,6 +4,8 @@ import Browser
 import Html exposing (Html, button, div, input, p, text)
 import Html.Attributes exposing (class, placeholder)
 import Html.Events exposing (onClick, onInput)
+import Task
+import Time
 
 
 port sendMessage : String -> Cmd msg
@@ -31,15 +33,17 @@ main =
 
 
 type alias Model =
-    { inputStr : String
-    , receivedMessage : String
+    { receivedMessage : String
+    , zone : Time.Zone
+    , time : Time.Posix
+    , receivedCount : Int
     }
 
 
 init : () -> ( Model, Cmd Msg )
 init flags =
-    ( { inputStr = "", receivedMessage = "" }
-    , Cmd.none
+    ( { receivedMessage = "", receivedCount = 0, zone = Time.utc, time = Time.millisToPosix 0 }
+    , Task.perform AdjustTimeZone Time.here
     )
 
 
@@ -48,24 +52,30 @@ init flags =
 
 
 type Msg
-    = UpdateInputStr String
-    | Send
+    = Send
     | Recv String
+    | NewTime Time.Posix
+    | AdjustTimeZone Time.Zone
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
-        UpdateInputStr str ->
-            ( { model | inputStr = str }
+        Send ->
+            ( model, sendMessage "front-to-back" )
+
+        Recv message ->
+            ( { model | receivedMessage = message, receivedCount = model.receivedCount + 1 }
+            , Task.perform NewTime Time.now
+            )
+
+        NewTime newTime ->
+            ( { model | time = newTime }
             , Cmd.none
             )
 
-        Send ->
-            ( model, sendMessage model.inputStr )
-
-        Recv message ->
-            ( { model | receivedMessage = message }
+        AdjustTimeZone newZone ->
+            ( { model | zone = newZone }
             , Cmd.none
             )
 
@@ -76,17 +86,29 @@ update msg model =
 
 view : Model -> Html Msg
 view model =
+    let
+        hour =
+            String.fromInt (Time.toHour model.zone model.time)
+
+        minute =
+            String.fromInt (Time.toMinute model.zone model.time)
+
+        second =
+            String.fromInt (Time.toSecond model.zone model.time)
+    in
     div [ class "container" ]
         [ div [ class "row" ]
             [ div []
-                [ input [ placeholder "Enter a name...", onInput UpdateInputStr ] []
-                , button [ onClick Send ] [ text "Greet" ]
+                [ button [ onClick Send ] [ text "front-to-back" ]
                 ]
             ]
-        , p [] [ text model.receivedMessage ]
+        , p [] [ text <| model.receivedMessage ++ "(" ++ String.fromInt model.receivedCount ++ ")" ]
+        , p [] [ text <| hour ++ ":" ++ minute ++ ":" ++ second ]
         ]
 
 
 subscriptions : Model -> Sub Msg
 subscriptions _ =
-    messageReceiver Recv
+    Sub.batch
+        [ messageReceiver Recv
+        ]
